@@ -19,9 +19,6 @@ while abstracting as much of the heavy lifting for all sports as possible.
 The way it is setup, adding a lacrosse team should be a fairly straight 
 forward matter of creating a lacrosse application.
 
-Dependencies
-------------
-- `django-schedule <http://github.com/thauber/django-schedule>`_, for schedule games and practices 
 
 Models
 ------
