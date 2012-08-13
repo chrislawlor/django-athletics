@@ -3,10 +3,10 @@ from django.db import models
 from django.utils.translation import ugettext_lazy as _
 from django.core.urlresolvers import reverse
 from django.contrib.auth.models import User
+from django.contrib.localflavor.us.fields import USZipCodeField
 from tagging.fields import TagField
 from django.contrib.localflavor.us.models import PhoneNumberField, USStateField 
 
-from schedule.models import Event
 import tagging
 import urllib
 import settings
@@ -44,14 +44,11 @@ class PublicManager(models.Manager):
     def get_query_set(self):
         return super(PublicManager, self).get_query_set().filter(public=True)
 
-class ZipCodeField(models.CharField):
-    def __unicode__(self):
-        return self.rjust(5, '0')
 
 class Town(models.Model):
     name=models.CharField(_('name'), max_length=100)
     state=USStateField(_('state'))
-    zipcode=ZipCodeField(_('zip'), max_length=5)
+    zipcode=USZipCodeField(_('zip'), max_length=5)
 
     def __unicode__(self):
         return u'%s, %s %s' % (self.name, self.state, self.zipcode)
@@ -65,6 +62,19 @@ class Sport(StandardMetadata):
     def __unicode__(self):
         return self.name
 
+class Position(StandardMetadata):
+    name = models.CharField(max_length=100)
+    slug = models.SlugField()
+    game = models.ForeignKey(Game)
+    description = models.TextField
+    
+    class Meta:
+        unique_together = ['game', 'slug']
+    
+    def __unicode__(self):
+        return self.name
+    
+    
 class School(StandardMetadata):
     """School model.
        A meta model for Schools that contains basic info each school needs:
@@ -113,54 +123,6 @@ class School(StandardMetadata):
     def __unicode__(self):
         return self.name
 
-class Coach(StandardMetadata):
-    firstname=models.CharField(_('first name'), max_length=100)
-    lastname=models.CharField(_('last name'), max_length=100)
-    nickname=models.CharField(_('nickname'), max_length=100, blank=True, null=True) 
-    slug=models.SlugField(_('slug'), unique=True)
-    user=models.ForeignKey(User, blank=True, null=True)
-    bio=models.TextField(_('bio'), blank=True, null=True)
-
-    objects=models.Manager()
-    public_objects=PublicManager()
-
-    class Meta:
-        verbose_name = _('coach')
-        verbose_name_plural = _('coaches')
-        get_latest_by='created'
-
-    def __unicode__(self):
-        return u'%s %s' % (self.firstname, self.lastname)
-        
-    def get_absolute_url(self):
-        args=[self.slug]
-        return reverse('coach_detail', args=args)
-
-class Player(StandardMetadata):
-    firstname=models.CharField(_('first name'), max_length=100)
-    lastname=models.CharField(_('last name'), max_length=100)
-    nickname=models.CharField(_('nickname'), max_length=100, blank=True, null=True) 
-    slug=models.SlugField(_('slug'), unique=True)
-    dob=models.DateField(_('date of birth'))
-    dog=models.DateField(_('date of graduation'), blank=True, null=True, help_text="If applicable.")
-    bio=models.TextField(_('bio'), blank=True, null=True)
-    public=models.BooleanField(_('public'), default=False)
-    user=models.ForeignKey(User, blank=True, null=True)
-
-    objects=models.Manager()
-    public_objects=PublicManager()
-
-    class Meta:
-        verbose_name = _('player')
-        verbose_name_plural = _('players')
-        get_latest_by='created'
-
-    def __unicode__(self):
-        return u'%s %s' % (self.firstname, self.lastname)
-        
-    def get_absolute_url(self):
-        args=[self.slug]
-        return reverse('player_detail', args=args)
 
 class Team(StandardMetadata):
     SPORT_TYPE_CHOICES=(
@@ -177,16 +139,11 @@ class Team(StandardMetadata):
         ('M', _('Mixed')),        
     )
     
-    school=models.ForeignKey(School)
+    school=models.ForeignKey(School, blank=True, null=True)
     sport=models.ForeignKey(Sport)
     sport_type=models.CharField(_('sport type'), default="NA", choices=SPORT_TYPE_CHOICES, max_length=2)
     gender=models.CharField(_('gender'), default="M", choices=GENDER_CHOICES, max_length=1)
-    year=models.PositiveIntegerField(_('year'), max_length=4)
-    coach=models.ForeignKey(Coach, related_name="coach")
-    asst_coach=models.ForeignKey(Coach, blank=True, null=True, related_name="asst_coach")
-    roster=models.ManyToManyField(Player, blank=True, null=True)
     public=models.BooleanField(_('public'), default=False)
-
     objects=models.Manager()
     public_objects=PublicManager()
     
@@ -215,6 +172,38 @@ class Team(StandardMetadata):
     #    if not self.mascot and self.organization.mascot:
     #        self.mascot = self.organization.mascot
     #    super(Team, self).save()        
+
+
+class Membership(StandardMetadata):
+    user = models.ForeignKey(User)
+    teamseason = models.ForeignKey('TeamSeason')
+    positions = models.ManyToManyField(Position, blank=True, null=True)
+
+
+class CoachingPosition(StandardMetadata):
+    user = models.ForeignKey(User)
+    teamseason = models.ForeignKey('TeamSeason')
+    
+
+class Season(StandardMetadata):
+    """
+    A collection of games.
+    """
+    year = models.PositiveIntegerField()
+
+
+class TeamSeason(StandardMetadata):
+    """
+    The makeup of a team for a particular season.
+    """
+    season = models.ForeignKey(Season)
+    team = models.ForeignKey(Team)
+    roster = models.ManyToManyField(User, through=Membership)
+    year = models.PositiveIntegerField()
+    coaches = models.ManyToManyField(User, through=CoachingPosition)
+    
+    def __unicode__(self):
+        return "%d %s" % (self.year, self.team.name)
     
 
 class Location(StandardMetadata):
@@ -223,6 +212,8 @@ class Location(StandardMetadata):
     school=models.ForeignKey(School, blank=True, null=True)
     address=models.CharField(_('address'), max_length=255)
     town=models.ForeignKey(Town)
+    zipcode=USZipCodeField()
+    state=USStateField()
     lat_long=models.CharField(_('coordinates'), max_length=255, blank=True)
     public=models.BooleanField(_('public'), default=False)
 
@@ -249,12 +240,19 @@ class Location(StandardMetadata):
                 location = "%s" % (self.town)
                 self.lat_long = get_lat_long(location)
         super(Location, self).save()
-        
-class Game(Event):
+
+
+class Game(StandardMetadata):
+    start = models.DateTimeField(_("start"))
+    end = models.DateTimeField(_("end"),help_text=_("The end time must be later than the start time."))
     home_team=models.ForeignKey(Team, related_name="home_team")
     away_team=models.ForeignKey(Team, related_name="away_team")
     location=models.ForeignKey(Location)
-
+    home_team_score = models.PositiveIntegerField(blank=True, null=True)
+    away_team_score = models.PositiveIntegerField(blank=True, null=True)
+    season = models.ForeignKey(Season)
+    summary = models.TextField()
+    
     class Meta:
         verbose_name = _('game')
         verbose_name_plural = _('games')
@@ -276,7 +274,3 @@ class Game(Event):
             self.end = self.start + timedelta(hours=1.5)
         super(Game, self).save()
 
-#class Meet(Event):
-#    host_team=models.ForeignKey(Team, related_name="host_team")
-#    attending_teams=models.ManyToManyField(Team, related_name="attending_teams", blank=True, null=True) 
-    
