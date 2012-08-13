@@ -3,13 +3,12 @@ from django.db import models
 from django.utils.translation import ugettext_lazy as _
 from django.core.urlresolvers import reverse
 from django.contrib.auth.models import User
-from django.contrib.localflavor.us.fields import USZipCodeField
+from django.conf import settings
 from tagging.fields import TagField
 from django.contrib.localflavor.us.models import PhoneNumberField, USStateField 
 
 import tagging
 import urllib
-import settings
 
 def get_lat_long(location):
     key = settings.GOOGLE_API_KEY
@@ -47,8 +46,7 @@ class PublicManager(models.Manager):
 
 class Town(models.Model):
     name=models.CharField(_('name'), max_length=100)
-    state=USStateField(_('state'))
-    zipcode=USZipCodeField(_('zip'), max_length=5)
+    
 
     def __unicode__(self):
         return u'%s, %s %s' % (self.name, self.state, self.zipcode)
@@ -65,8 +63,8 @@ class Sport(StandardMetadata):
 class Position(StandardMetadata):
     name = models.CharField(max_length=100)
     slug = models.SlugField()
-    game = models.ForeignKey(Game)
-    description = models.TextField
+    game = models.ForeignKey(Sport)
+    description = models.TextField()
     
     class Meta:
         unique_together = ['game', 'slug']
@@ -183,6 +181,21 @@ class Membership(StandardMetadata):
 class CoachingPosition(StandardMetadata):
     user = models.ForeignKey(User)
     teamseason = models.ForeignKey('TeamSeason')
+
+
+class LeagueMembership(StandardMetadata):
+    league = models.ForeignKey('League')
+    team = models.ForeignKey('Team')
+    joined = models.DateField()
+    left = models.DateField(blank=True, null=True)
+
+
+class League(StandardMetadata):
+    name = models.CharField(max_length=100)
+    acryonym = models.CharField(max_length=10, blank=True, null=True)
+    description = models.TextField(blank=True, null=True)
+    url = models.URLField(blank=True, null=True)
+    teams = models.ManyToManyField(Team, through=LeagueMembership)
     
 
 class Season(StandardMetadata):
@@ -190,6 +203,7 @@ class Season(StandardMetadata):
     A collection of games.
     """
     year = models.PositiveIntegerField()
+    sport = models.ForeignKey(Sport)
 
 
 class TeamSeason(StandardMetadata):
@@ -198,9 +212,9 @@ class TeamSeason(StandardMetadata):
     """
     season = models.ForeignKey(Season)
     team = models.ForeignKey(Team)
-    roster = models.ManyToManyField(User, through=Membership)
+    roster = models.ManyToManyField(User, through=Membership, related_name='playing_seasons')
     year = models.PositiveIntegerField()
-    coaches = models.ManyToManyField(User, through=CoachingPosition)
+    coaches = models.ManyToManyField(User, through=CoachingPosition, related_name='coaching_seasons')
     
     def __unicode__(self):
         return "%d %s" % (self.year, self.team.name)
@@ -211,8 +225,9 @@ class Location(StandardMetadata):
     slug=models.SlugField(_('slug'), unique=True)
     school=models.ForeignKey(School, blank=True, null=True)
     address=models.CharField(_('address'), max_length=255)
-    town=models.ForeignKey(Town)
-    zipcode=USZipCodeField()
+    city=models.CharField(_('city'), max_length=100)
+    state=USStateField(_('state'))
+    zipcode=models.CharField(_('zip'), max_length=10)
     state=USStateField()
     lat_long=models.CharField(_('coordinates'), max_length=255, blank=True)
     public=models.BooleanField(_('public'), default=False)
